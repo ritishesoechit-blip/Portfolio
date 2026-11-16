@@ -329,6 +329,176 @@
     view.addEventListener('click', openFrame);
   });
 
+  /* ---------- work: project cards (three steps, each its own composition) ---------- */
+  var cardsWrap = $('.pcards');
+  if (cardsWrap) {
+    var pcards = $$('.pcard', cardsWrap), DWELL = 6000;
+    var restartBar = function (c) { var b = $('.tab.on .bar', c); if (!b) return; b.style.animation = 'none'; void b.offsetWidth; b.style.animation = ''; };
+    var cardStep = function (c, i) {
+      if (c.getAttribute('data-step') === String(i)) return;
+      c.setAttribute('data-step', i);
+      $$('.scene', c).forEach(function (s, k) { s.classList.toggle('on', k === i); s.setAttribute('aria-hidden', k === i ? 'false' : 'true'); });
+      $$('.tab', c).forEach(function (t, k) { t.classList.toggle('on', k === i); t.setAttribute('aria-selected', k === i ? 'true' : 'false'); });
+      $$('.desc', c).forEach(function (d, k) { d.classList.toggle('on', k === i); });
+      restartBar(c);
+    };
+    pcards.forEach(function (c) {
+      var scenes = $$('.scene', c), timer = null, stopped = false, held = false;
+      c.__live = false;
+      // gentle auto-advance while the card is the one in front; any touch of the card hands control to the visitor
+      c.__run = function () {
+        clearTimeout(timer);
+        var on = c.__live && !stopped && !reduce;
+        c.classList.toggle('run', on); c.classList.toggle('hold', on && held);
+        if (!on || held) return;
+        restartBar(c);
+        timer = setTimeout(function () { cardStep(c, (+c.getAttribute('data-step') + 1) % scenes.length); c.__run(); }, DWELL);
+      };
+      var stop = function () { stopped = true; c.__run(); };
+      c.addEventListener('mouseenter', function () { held = true; c.__run(); });
+      c.addEventListener('mouseleave', function () { held = false; c.__run(); });
+      c.addEventListener('focusin', function () { held = true; c.__run(); });
+      c.addEventListener('focusout', function () { held = false; c.__run(); });
+      var hoverT = null;
+      $$('.tab', c).forEach(function (t) {
+        var i = +t.getAttribute('data-go');
+        t.addEventListener('click', function () { stop(); cardStep(c, i); });
+        t.addEventListener('mouseenter', function () { if (!matchMedia('(hover: hover) and (pointer: fine)').matches) return; clearTimeout(hoverT); hoverT = setTimeout(function () { stop(); cardStep(c, i); }, 140); });
+        t.addEventListener('mouseleave', function () { clearTimeout(hoverT); });
+      });
+      // full-size viewer: every piece in the card, starting from the one asked for
+      var items = function () {
+        var out = [], title = c.getAttribute('data-title') || '';
+        scenes.forEach(function (sc) {
+          $$('.it', sc).forEach(function (it) {
+            var im = $('img', it);
+            out.push({ src: bestSrc(im), thumb: im.currentSrc || im.src, title: title, text: sc.getAttribute('data-cap') || '', alt: im.alt, node: it,
+              el: function () { return sc.classList.contains('on') ? im : null; } });
+          });
+        });
+        return out;
+      };
+      $$('.it', c).forEach(function (it) {
+        it.addEventListener('click', function () { stop(); var L = items(), k = 0; L.forEach(function (x, j) { if (x.node === it) k = j; }); LB.open(L, k, $('img', it)); });
+      });
+      var ex = $('.pc-expand', c);
+      if (ex) ex.addEventListener('click', function () {
+        stop(); var L = items(), step = +c.getAttribute('data-step'), k = 0, seen = 0;
+        for (var j = 0; j < L.length; j++) { if (scenes.indexOf(L[j].node.parentNode) === step) { k = j; break; } }
+        LB.open(L, k, $('.scene.on .it img', c));
+      });
+    });
+    // which card is in front: the one whose top has reached the upper half and whose successor has not
+    var frontCard = function () {
+      var h = innerHeight, front = null;
+      pcards.forEach(function (c, i) {
+        var r = c.getBoundingClientRect(), nx = pcards[i + 1] ? pcards[i + 1].getBoundingClientRect().top : Infinity;
+        if (r.top < h * 0.5 && r.bottom > h * 0.4 && nx > h * 0.5) front = c;
+      });
+      pcards.forEach(function (c) { var live = c === front; if (live !== c.__live) { c.__live = live; c.__run(); } });
+    };
+    var fcQueued = false;
+    window.addEventListener('scroll', function () { if (fcQueued) return; fcQueued = true; requestAnimationFrame(function () { fcQueued = false; frontCard(); }); }, { passive: true });
+    window.addEventListener('resize', frontCard);
+    frontCard();
+    // jump ticks: cards hold the screen while stuck, so go to each card's place in the flow, not where it is drawn
+    cardsWrap.addEventListener('click', function (e) {
+      var a = e.target.closest && e.target.closest('.pc-ticks a'); if (!a) return;
+      var t = document.getElementById(a.getAttribute('href').slice(1)); if (!t) return;
+      e.preventDefault(); e.stopPropagation();
+      var k = pcards.indexOf(t), y = cardsWrap.getBoundingClientRect().top + scrollY;
+      for (var j = 0; j < k; j++) y += pcards[j].offsetHeight + (parseFloat(getComputedStyle(pcards[j + 1]).marginTop) || 0);
+      scrollTo(y);
+    }, true);
+  }
+
+  /* ---------- hero reel: drifts on its own, and can be dragged, swiped or scrolled sideways ---------- */
+  var reelEl = $('.reel');
+  if (reelEl) (function () {
+    var track = $('.reel-track', reelEl), set = $('.reel-set', reelEl);
+    reelEl.classList.add('js-reel');
+    var x = 0, setW = 0, v = 0, speed = reduce ? 0 : 26, hover = false, drag = false, pid = null, captured = false;
+    var lastX = 0, lastT = 0, moved = 0, visible = true, prev = 0;
+    var measure = function () { setW = set.getBoundingClientRect().width; };
+    measure(); window.addEventListener('resize', measure); window.addEventListener('load', measure);
+    var wrap = function () { if (!setW) return; x = x % setW; if (x > 0) x -= setW; };
+    var frame = function (t) {
+      var dt = prev ? Math.min(0.05, (t - prev) / 1000) : 0; prev = t;
+      if (!drag) {
+        x += v * dt; v *= Math.pow(0.04, dt);           // glide after a flick, settling in about a second
+        if (Math.abs(v) < 4) v = 0;
+        if (!hover && !v) x -= speed * dt;
+      }
+      wrap();
+      track.style.transform = 'translate3d(' + x.toFixed(2) + 'px,0,0)';
+      if (visible) requestAnimationFrame(frame); else prev = 0;
+    };
+    requestAnimationFrame(frame);
+    if ('IntersectionObserver' in window) new IntersectionObserver(function (es) {
+      var was = visible; visible = es[0].isIntersecting; if (visible && !was) requestAnimationFrame(frame);
+    }).observe(reelEl);
+    reelEl.addEventListener('mouseenter', function () { hover = true; });
+    reelEl.addEventListener('mouseleave', function () { hover = false; });
+    reelEl.addEventListener('pointerdown', function (e) {
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      drag = true; captured = false; pid = e.pointerId; moved = 0; v = 0; lastX = e.clientX; lastT = performance.now();
+    });
+    reelEl.addEventListener('pointermove', function (e) {
+      if (!drag || e.pointerId !== pid) return;
+      var now = performance.now(), dx = e.clientX - lastX, dt = Math.max(1, now - lastT) / 1000;
+      x += dx; moved += Math.abs(dx);
+      v = v * 0.6 + (dx / dt) * 0.4;
+      lastX = e.clientX; lastT = now;
+      if (moved > 6 && !captured) { captured = true; reelEl.classList.add('dragging'); try { reelEl.setPointerCapture(pid); } catch (er) {} }
+    });
+    var end = function (e) {
+      if (!drag || (e && e.pointerId !== pid)) return;
+      drag = false; reelEl.classList.remove('dragging');
+      if (performance.now() - lastT > 90) v = 0;     // held still before letting go: no glide
+      v = Math.max(-2600, Math.min(2600, v));
+      try { reelEl.releasePointerCapture(pid); } catch (er) {}
+    };
+    reelEl.addEventListener('pointerup', end); reelEl.addEventListener('pointercancel', end);
+    // a drag is not a click: keep the piece from opening its case study
+    reelEl.addEventListener('click', function (e) { if (moved > 6) { e.preventDefault(); e.stopPropagation(); } }, true);
+    // trackpads: sideways scrolling moves the row; vertical scrolling still moves the page
+    reelEl.addEventListener('wheel', function (e) {
+      if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
+      e.preventDefault(); x -= e.deltaX; v = 0;
+    }, { passive: false });
+  })();
+
+  /* ---------- work grid: each card moves through idea, image and system ---------- */
+  var gcs = $$('.gcard');
+  if (gcs.length) {
+    var fine = matchMedia('(hover: hover) and (pointer: fine)').matches;
+    gcs.forEach(function (c) {
+      var scenes = $$('.scene', c), labs = $$('.gc-lab > span', c), dots = $$('.gc-dots i', c);
+      var cover = +(c.getAttribute('data-cover') || 0), cur = cover, timer = null;
+      var show = function (i) {
+        cur = i;
+        scenes.forEach(function (s, k) { s.classList.toggle('on', k === i); });
+        labs.forEach(function (s, k) { s.classList.toggle('on', k === i); });
+        dots.forEach(function (s, k) { s.classList.toggle('on', k === i); });
+      };
+      var cycle = function (ms) { clearInterval(timer); timer = setInterval(function () { show((cur + 1) % scenes.length); }, ms); };
+      var halt = function () { clearInterval(timer); timer = null; };
+      if (reduce) return;
+      if (fine) {
+        // desktop: hover plays the three steps, leaving returns to the cover
+        c.addEventListener('mouseenter', function () { show((cover + 1) % scenes.length); cycle(1700); });
+        c.addEventListener('mouseleave', function () { halt(); show(cover); });
+        c.addEventListener('focus', function () { show((cover + 1) % scenes.length); cycle(1700); });
+        c.addEventListener('blur', function () { halt(); show(cover); });
+      } else if ('IntersectionObserver' in window) {
+        // touch: cards play on their own while they are on screen
+        new IntersectionObserver(function (es) {
+          es.forEach(function (e) { if (e.isIntersecting && e.intersectionRatio >= 0.6) { if (!timer) cycle(2800); } else halt(); });
+        }, { threshold: [0, 0.6, 1] }).observe(c);
+      }
+    });
+  }
+
   /* ---------- back button ---------- */
   $$('[data-back]').forEach(function (a) {
     a.addEventListener('click', function (e) {
@@ -359,11 +529,22 @@
     });
   }
   $$('.vid').forEach(function (v) {
-    var btn = $('.vid-btn', v), id = v.getAttribute('data-yt');
+    var btn = $('.vid-btn', v);
     btn.addEventListener('pointerenter', warm, { once: true });
     btn.addEventListener('focus', warm, { once: true });
     btn.addEventListener('click', function () {
-      if (sandboxed) { window.open('https://www.youtube.com/watch?v=' + id, '_blank', 'noopener'); return; }
+      var id = v.getAttribute('data-yt');
+      if (sandboxed) {
+        var box = $('.vid-box', v), note = $('.vid-note', box);
+        if (!note) {
+          note = document.createElement('div'); note.className = 'vid-note';
+          note.innerHTML = '<p><b>This film plays right here on the live site.</b><span>The preview window blocks embedded YouTube players.</span></p><a target="_blank" rel="noopener">Watch on YouTube now \u2197</a><button type="button" aria-label="Close">\u00d7</button>';
+          box.appendChild(note);
+          $('button', note).addEventListener('click', function (ev) { ev.stopPropagation(); note.classList.remove('on'); });
+        }
+        $('a', note).href = 'https://www.youtube.com/watch?v=' + id;
+        note.classList.add('on'); return;
+      }
       stopAll(v);
       var f = document.createElement('iframe');
       f.src = 'https://www.youtube-nocookie.com/embed/' + id + '?autoplay=1&rel=0&modestbranding=1&playsinline=1';
@@ -376,6 +557,60 @@
       setTimeout(function () { f.focus(); }, 300);
     });
   });
+
+  /* ---------- where it started: photos open in the viewer ---------- */
+  var rbtns = $$('.roots .rt-btn');
+  if (rbtns.length) {
+    var ritems = rbtns.map(function (b) {
+      var im = $('img', b), cp = $('figcaption', b);
+      return { src: bestSrc(im), thumb: im.currentSrc || im.src, title: 'Where it started', text: cp ? cp.textContent : '', alt: im.alt, el: function () { return im; } };
+    });
+    rbtns.forEach(function (b, i) { b.addEventListener('click', function () { LB.open(ritems, i, $('img', b)); }); });
+  }
+
+  /* ---------- index: open a category straight from a link (#f=Campaign) ---------- */
+  var hf = location.hash.match(/^#f=(\w+)/);
+  if (hf) { var fbtn = document.querySelector('.filters button[data-f="' + hf[1] + '"]'); if (fbtn) setTimeout(function () { fbtn.click(); }, 50); }
+
+  /* ---------- homepage films: pick a film ---------- */
+  var fmain = $('.fh-main');
+  if (fmain) {
+    var fts = $$('.fh-list .ft');
+    fts.forEach(function (b) {
+      b.addEventListener('click', function () {
+        if (b.classList.contains('on') && fmain.classList.contains('playing')) return;
+        stopAll();
+        fts.forEach(function (o) { var on = o === b; o.classList.toggle('on', on); o.setAttribute('aria-pressed', on ? 'true' : 'false'); });
+        var id = b.getAttribute('data-yt'), ss = b.getAttribute('data-srcset');
+        fmain.setAttribute('data-yt', id);
+        $$('.vid-btn img', fmain).forEach(function (im) {
+          im.srcset = ss; im.src = 'assets/img/yt-' + id + '-960.webp';
+          im.width = +b.getAttribute('data-w'); im.height = +b.getAttribute('data-h');
+        });
+        $('.vid-btn', fmain).setAttribute('aria-label', 'Play film: ' + b.getAttribute('data-title'));
+        $('.fh-cap small', fmain).textContent = b.getAttribute('data-proj');
+        $('.fh-cap b', fmain).textContent = b.getAttribute('data-title');
+        $('figcaption a', fmain).href = 'https://www.youtube.com/watch?v=' + id;
+        $('.fh-role', fmain).textContent = b.getAttribute('data-role');
+        if (window.matchMedia('(max-width: 900px)').matches) {
+          var r = fmain.getBoundingClientRect();
+          if (r.top < 0 || r.top > innerHeight * .5) {
+            if (window.__lenis) window.__lenis.scrollTo(fmain, { offset: -90 }); else fmain.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }
+        }
+        if (!sandboxed) $('.vid-btn', fmain).click();
+      });
+    });
+  }
+
+  /* ---------- impact: bars, meters, ring fill in on view ---------- */
+  var ig = $('.imp-grid');
+  if (ig) {
+    if ('IntersectionObserver' in window) {
+      var iio = new IntersectionObserver(function (es) { es.forEach(function (e) { if (e.isIntersecting) { e.target.classList.add('is-in'); iio.unobserve(e.target); } }); }, { threshold: .25 });
+      $$('.imp-card', ig).forEach(function (c) { iio.observe(c); });
+    } else $$('.imp-card', ig).forEach(function (c) { c.classList.add('is-in'); });
+  }
 
   /* ---------- index page: filters + lightbox ---------- */
   var mas = $('#masonry');
@@ -420,7 +655,7 @@
   function drawPanel(el, i) {
     if (!hasGsap || reduce) return;
     var p = $$('.sys-panel', el)[i]; if (!p) return;
-    var paths = $$('path', p), nodes = $$('.node, .ui-card tr, .lib > *', p);
+    var paths = $$('path', p), nodes = $$('.node, .ui-card tr, .lib > *, .ag-anim', p);
     paths.forEach(function (path) { var L = path.getTotalLength ? path.getTotalLength() : 400; gsap.fromTo(path, { strokeDasharray: L, strokeDashoffset: L }, { strokeDashoffset: 0, duration: 1.2, ease: 'power2.out', delay: 0.1 }); });
     if (nodes.length) gsap.fromTo(nodes, { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.6, stagger: 0.05, ease: 'power2.out', overwrite: true });
   }
@@ -489,7 +724,7 @@
       nav.classList.toggle('is-hidden', down && y > 240 && !nav.classList.contains('open'));
       lastY = y;
     } });
-    var map = { work: '#work', systems: '#systems', photo: '#photo', about: '#about' };
+    var map = { about: '#about', systems: '#systems', work: '#work', photo: '#photo', films: '#films' };
     Object.keys(map).forEach(function (k) {
       var sec = $(map[k]), link = $('.nav-links a[href$="' + map[k] + '"]', nav);
       if (!sec || !link) return;
@@ -666,12 +901,33 @@
       if (lines.length) gsap.to(lines, { yPercent: 0, duration: 1.2, ease: 'power4.out', stagger: 0.08 });
       gsap.to('.hero-pill, .hero .sub, .hero .hero-ctas', { opacity: 1, y: 0, duration: 1, ease: 'power3.out', stagger: 0.12, delay: 0.25 });
     } });
-    gsap.to('.hero-bg', { yPercent: 10, ease: 'none', scrollTrigger: { trigger: hero, start: 'top top', end: 'bottom top', scrub: true } });
-    gsap.fromTo('#board', { y: 120, rotateX: 14, scale: 0.94 }, { y: 0, rotateX: 0, scale: 1, ease: 'none', scrollTrigger: { trigger: hero, start: 'top 60%', end: 'bottom bottom', scrub: 0.8 } });
-    var ticks = $$('#board .tick'), items = $$('#board .board-side li');
-    ScrollTrigger.create({ trigger: '#board', start: 'top 80%', once: true, onEnter: function () {
-      ticks.forEach(function (t, i) { setTimeout(function () { t.classList.add('done'); items.forEach(function (li, k) { li.classList.toggle('on', k === i); }); }, 300 + i * 420); });
-    } });
+    if ($('.reel')) {
+      gsap.set('.reel', { opacity: 0, y: 50 });
+      ScrollTrigger.create({ trigger: hero, start: 'top 75%', once: true, onEnter: function () { gsap.to('.reel', { opacity: 1, y: 0, duration: 1.4, ease: 'power3.out', delay: 0.45 }); } });
+    }
+  }
+
+  /* ---------- work grid: cards rise in as the section arrives ---------- */
+  if ($('.gcards')) {
+    gsap.from('.gcard', { y: 48, opacity: 0, duration: 1, ease: 'power3.out', stagger: 0.08, clearProps: 'opacity,transform',
+      scrollTrigger: { trigger: '.gcards', start: 'top 82%', once: true } });
+  }
+
+  /* ---------- work cards: depth while stacking (desktop), rise-in (phones) ---------- */
+  var pcs = $$('.pcard');
+  if (pcs.length) {
+    var mmc = gsap.matchMedia();
+    mmc.add('(min-width: 961px) and (min-height: 620px)', function () {
+      pcs.forEach(function (c, i) {
+        if (!pcs[i + 1]) return;
+        gsap.to($('.pc-in', c), { scale: 0.94, '--cover': 0.2, ease: 'none', scrollTrigger: { trigger: pcs[i + 1], start: 'top bottom', end: 'top top', scrub: true } });
+      });
+    });
+    mmc.add('(max-width: 960px), (max-height: 619px)', function () {
+      pcs.forEach(function (c) {
+        gsap.from($('.pc-in', c), { y: 56, opacity: 0, duration: 1, ease: 'power3.out', scrollTrigger: { trigger: c, start: 'top 90%', once: true } });
+      });
+    });
   }
 
   /* ---------- pinned projects ---------- */
@@ -689,23 +945,27 @@
     gsap.fromTo($('.frame', el), { y: 60, rotateX: 8, opacity: 0.6 }, { y: 0, rotateX: 0, opacity: 1, ease: 'power2.out', scrollTrigger: { trigger: el, start: 'top 85%', end: 'top 20%', scrub: 0.6 } });
   });
 
-  /* ---------- systems ---------- */
+  /* ---------- systems: natural scroll, rail follows the panel in view ---------- */
   var sys = $('#systems');
   if (sys) {
-    var sst = ScrollTrigger.create({ trigger: sys, start: 'top top', end: 'bottom bottom',
-      onUpdate: function (s) { if (mqDesk.matches) setStep(sys, Math.min(3, Math.floor(s.progress * 4)), 'sys'); } });
-    ScrollTrigger.create({ trigger: sys, start: 'top 60%', once: true, onEnter: function () { drawPanel(sys, 0); } });
-    $$('.sys-panel', sys).forEach(function (pn, i) {
-      if (i === 0) return;
-      if (!mqDesk.matches) gsap.set($$('.node, .ui-card tr, .lib > *', pn), { opacity: 0, y: 10 });
-      ScrollTrigger.create({ trigger: pn, start: 'top 72%', once: true, onEnter: function () { if (!mqDesk.matches) drawPanel(sys, i); } });
+    var spanels = $$('.sys-panel', sys), stabs = $$('.sys-tabs button', sys), srail = $('.sys-tabs', sys);
+    var setTab = function (i) {
+      sys.setAttribute('data-step', i);
+      stabs.forEach(function (t, k) { t.classList.toggle('on', k === i); t.setAttribute('aria-selected', k === i ? 'true' : 'false'); });
+      if (srail) srail.style.setProperty('--sp', ((i + 1) / spanels.length).toFixed(3));
+    };
+    setTab(0);
+    spanels.forEach(function (pn, i) {
+      gsap.set($$('.node, .ui-card tr, .lib > *, .ag-anim, .hub-core', pn), { opacity: 0, y: 10 });
+      ScrollTrigger.create({ trigger: pn, start: 'top 75%', once: true, onEnter: function () {
+        var paths = $$('path', pn), nodes = $$('.node, .ui-card tr, .lib > *, .ag-anim, .hub-core', pn);
+        paths.forEach(function (path) { var L = path.getTotalLength ? path.getTotalLength() : 400; gsap.fromTo(path, { strokeDasharray: L, strokeDashoffset: L }, { strokeDashoffset: 0, duration: 1.2, ease: 'power2.out', delay: 0.1, onComplete: function () { path.style.strokeDasharray = ''; path.classList.add('live'); } }); });
+        if (nodes.length) gsap.to(nodes, { opacity: 1, y: 0, duration: 0.6, stagger: 0.05, ease: 'power2.out' });
+      } });
+      ScrollTrigger.create({ trigger: pn, start: 'top 55%', end: 'bottom 55%', onToggle: function (st) { if (st.isActive) setTab(i); } });
     });
-    $$('[data-go]', sys).forEach(function (b) {
-      b.addEventListener('click', function () {
-        var i = +b.getAttribute('data-go');
-        if (!mqDesk.matches) { setStep(sys, i, 'sys'); return; }
-        scrollTo(sst.start + (sst.end - sst.start) * ((i + 0.5) / 4));
-      });
+    stabs.forEach(function (b, i) {
+      b.addEventListener('click', function () { var pn = spanels[i]; if (pn) scrollTo(pn.getBoundingClientRect().top + window.scrollY - 120); });
     });
   }
 
