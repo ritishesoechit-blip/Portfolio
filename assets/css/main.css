@@ -1348,3 +1348,27 @@ html.lbx-lock, html.lbx-lock body { overflow: hidden; }
   .logos-scroll img { width: 620px; max-width: none; }
 }
 @media (max-width: 600px) { .tbl th:nth-child(5), .tbl td:nth-child(5), .tbl th:nth-child(6), .tbl td:nth-child(6) { display: none; } .tbl td:nth-child(4) { min-width: 0; } }
+
+/* ===== Leadership ===== */
+.lead { background: var(--cream); padding-block: clamp(72px, 9vw, 120px); }
+.lead-head { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, .9fr); gap: 8px clamp(28px, 5vw, 80px); align-items: end; }
+.lead-head .eyebrow { grid-column: 1 / -1; }
+.lead h2 { font-size: clamp(32px, 4.2vw, 60px); line-height: 1.02; letter-spacing: -.04em; margin: 8px 0 0; }
+.lead h2 em { color: var(--ember); }
+.lead .lede { max-width: 44ch; }
+.ld-grid { list-style: none; margin: clamp(36px, 4.5vw, 56px) 0 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: clamp(14px, 1.6vw, 22px); }
+.ld-card { background: #fff; border-radius: 22px; padding: clamp(20px, 2.2vw, 28px); display: grid; grid-template-rows: auto auto 1fr; gap: 10px; box-shadow: 0 0 0 1px var(--line) inset; transition: transform .5s var(--ease), box-shadow .5s; }
+.ld-card:hover { transform: translateY(-4px); box-shadow: 0 0 0 1px var(--line) inset, 0 30px 50px -30px rgba(50,20,10,.35); }
+.ld-logo { height: clamp(110px, 10vw, 140px); display: grid; place-items: center; border-radius: 14px; background: #FAF7F3; padding: 18px 22px; margin-bottom: 8px; }
+.ld-logo img { max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; }
+.ld-card b { font-size: 18px; font-weight: 600; letter-spacing: -.015em; }
+.ld-card p { font-size: 14.5px; line-height: 1.45; color: var(--ink-2); }
+@media (max-width: 860px) { .lead-head { grid-template-columns: minmax(0, 1fr); } .ld-grid { grid-template-columns: minmax(0, 1fr); } .ld-card { grid-template-columns: 120px minmax(0, 1fr); grid-template-rows: auto 1fr; column-gap: 16px; align-items: center; } .ld-logo { grid-row: span 2; height: 90px; margin: 0; padding: 10px; } .ld-card b { align-self: end; } .ld-card p { align-self: start; } }
+.ld-logo { background: #fff; box-shadow: 0 0 0 1px var(--line) inset; overflow: hidden; }
+.ld-logo img { max-height: clamp(74px, 7vw, 100px); max-width: 88%; }
+@media (max-width: 860px) { .ld-logo img { max-height: 66px; max-width: 92%; } }
+/* thinner phone bezel (padding % was measured against the whole stage) */
+.m-phone { padding: clamp(3px, .42vw, 6px); border-radius: clamp(14px, 1.9vw, 26px); }
+.m-phone .scr { border-radius: clamp(11px, 1.5vw, 21px); }
+.lead h2 { font-size: clamp(64px, 10vw, 150px); line-height: .9; letter-spacing: -.055em; }
+@media (max-width: 860px) { .lead .lede { margin-top: 10px; } }
